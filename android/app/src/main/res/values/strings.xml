@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">Liquid Volume</string>
+    <string name="accessibility_service_label">Liquid Volume Service</string>
+    <string name="accessibility_service_description">Custom volume button handler</string>
+</resources>
