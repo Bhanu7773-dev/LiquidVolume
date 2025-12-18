@@ -112,6 +112,13 @@ class MainActivity : FlutterActivity() {
                     startActivity(intent)
                     result.success(null)
                 }
+                "openDNDSettings" -> {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                        val intent = Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS)
+                        startActivity(intent)
+                    }
+                    result.success(null)
+                }
                 "isAccessibilityEnabled" -> {
                     result.success(isAccessibilityServiceEnabled(this, VolumeAccessibilityService::class.java))
                 }

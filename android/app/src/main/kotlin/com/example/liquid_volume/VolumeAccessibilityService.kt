@@ -27,6 +27,7 @@ class VolumeAccessibilityService : AccessibilityService() {
         instance = this
         Log.d(TAG, "Service Connected")
         audioManager = getSystemService(android.content.Context.AUDIO_SERVICE) as android.media.AudioManager
+        val notificationManager = getSystemService(android.content.Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
         
         val info = serviceInfo
         info.flags = info.flags or android.accessibilityservice.AccessibilityServiceInfo.FLAG_REQUEST_FILTER_KEY_EVENTS
@@ -109,6 +110,17 @@ class VolumeAccessibilityService : AccessibilityService() {
 
         val flags = android.media.AudioManager.FLAG_REMOVE_SOUND_AND_VIBRATE
 
+        val notificationManager = getSystemService(android.content.Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+
+        // Auto-exit Silent/DND if increasing Ringer/Notif volume
+        if (target > 0 && (streamType == android.media.AudioManager.STREAM_RING || streamType == android.media.AudioManager.STREAM_NOTIFICATION)) {
+            if (notificationManager.isNotificationPolicyAccessGranted) {
+                if (audioManager.ringerMode != android.media.AudioManager.RINGER_MODE_NORMAL) {
+                     audioManager.ringerMode = android.media.AudioManager.RINGER_MODE_NORMAL
+                }
+            }
+        }
+
         repeat(kotlin.math.abs(delta)) {
             // Defensive check to avoid overshooting
             val now = audioManager.getStreamVolume(streamType)
@@ -116,7 +128,12 @@ class VolumeAccessibilityService : AccessibilityService() {
                 (direction == android.media.AudioManager.ADJUST_LOWER && now <= safeTarget)
             ) return@repeat
             
-            audioManager.adjustStreamVolume(streamType, direction, flags)
+            try {
+                audioManager.adjustStreamVolume(streamType, direction, flags)
+            } catch (e: SecurityException) {
+                Log.e(TAG, "SecurityException: Not allowed to change Do Not Disturb state")
+                return@repeat
+            }
         }
 
         Log.d(TAG, "Volume adjusted (Stream $streamType): $current -> $safeTarget")

@@ -60,4 +60,8 @@ class VolumeService {
       print("Error setting volume: $e");
     }
   }
+
+  static Future<void> openDNDSettings() async {
+    await _permissionChannel.invokeMethod('openDNDSettings');
+  }
 }
