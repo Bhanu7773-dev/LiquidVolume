@@ -130,7 +130,7 @@ class MainActivity : FlutterActivity() {
                         val targetVolume = (volume * maxVolume).toInt().coerceIn(0, maxVolume)
 
                         if (VolumeAccessibilityService.instance != null) {
-                            VolumeAccessibilityService.instance?.applySliderVolume(targetVolume)
+                            VolumeAccessibilityService.instance?.applySliderVolume(AudioManager.STREAM_MUSIC, targetVolume)
                         } else {
                             // BLOCKING setStreamVolume fallback as it causes crashes/OEM issues
                             android.util.Log.w("LiquidVolume", "Accessibility Service not ready. Ignoring volume change.")
@@ -144,7 +144,7 @@ class MainActivity : FlutterActivity() {
                     val target = call.argument<Int>("target")
                     if (target != null) {
                         if (VolumeAccessibilityService.instance != null) {
-                            VolumeAccessibilityService.instance?.applySliderVolume(target)
+                            VolumeAccessibilityService.instance?.applySliderVolume(AudioManager.STREAM_MUSIC, target)
                             result.success(null)
                         } else {
                             result.error("SERVICE_NOT_READY", "Accessibility Service not active", null)

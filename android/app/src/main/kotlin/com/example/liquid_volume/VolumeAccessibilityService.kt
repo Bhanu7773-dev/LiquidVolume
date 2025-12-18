@@ -16,10 +16,6 @@ class VolumeAccessibilityService : AccessibilityService() {
 
     private lateinit var audioManager: android.media.AudioManager
     
-    // Repeat logic - Production Grade
-    private val handler = android.os.Handler(android.os.Looper.getMainLooper())
-    private var repeatRunnable: Runnable? = null
-    private var repeatingDirection: String? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -37,83 +33,71 @@ class VolumeAccessibilityService : AccessibilityService() {
         serviceInfo = info
     }
 
+    private val handler = android.os.Handler(android.os.Looper.getMainLooper())
+    private var repeatRunnable: Runnable? = null
+    private var isHolding = false
+
     override fun onKeyEvent(event: KeyEvent): Boolean {
         when (event.keyCode) {
             KeyEvent.KEYCODE_VOLUME_UP,
             KeyEvent.KEYCODE_VOLUME_DOWN -> {
 
-                when (event.action) {
-                    KeyEvent.ACTION_DOWN -> {
-                        // Only start if not already repeating (repeatCount 0)
-                        // Note: We ignore subsequent repeat events from system to rely on our own timing
-                        if (event.repeatCount == 0) {
-                            val dir = if (event.keyCode == KeyEvent.KEYCODE_VOLUME_UP) "volume_up" else "volume_down"
+                if (event.action == KeyEvent.ACTION_DOWN && !isHolding) {
+                    isHolding = true
 
-                            // First immediate change
-                            changeVolume(dir)
-                            sendVolumeEvent(dir)
+                    val direction =
+                        if (event.keyCode == KeyEvent.KEYCODE_VOLUME_UP)
+                            android.media.AudioManager.ADJUST_RAISE
+                        else
+                            android.media.AudioManager.ADJUST_LOWER
 
-                            startRepeating(dir)
+                    repeatRunnable = object : Runnable {
+                        override fun run() {
+                            changeVolume(direction)
+                            sendVolumeEvent()
+                            handler.postDelayed(this, 120) // repeat speed
                         }
-                        return true
                     }
 
-                    KeyEvent.ACTION_UP -> {
-                        stopRepeating()
-                        return true
-                    }
+                    handler.post(repeatRunnable!!)
+                    return true
+                }
+
+                if (event.action == KeyEvent.ACTION_UP) {
+                    isHolding = false
+                    repeatRunnable?.let { handler.removeCallbacks(it) }
+                    repeatRunnable = null
+                    return true
                 }
             }
         }
-        return super.onKeyEvent(event)
+        return false
     }
 
-    private fun startRepeating(direction: String) {
-        stopRepeating() // safety
-
-        repeatingDirection = direction
-
-        repeatRunnable = object : Runnable {
-            override fun run() {
-                val dir = repeatingDirection ?: return
-                changeVolume(dir)
-                sendVolumeEvent(dir)
-
-                // Repeat speed (matches system feel)
-                handler.postDelayed(this, 80) // ~12.5 steps/sec
-            }
-        }
-
-        // Initial delay before auto-repeat starts
-        handler.postDelayed(repeatRunnable!!, 350)
+    private fun changeVolume(direction: Int) {
+        audioManager.adjustStreamVolume(
+            android.media.AudioManager.STREAM_MUSIC,
+            direction,
+            android.media.AudioManager.FLAG_REMOVE_SOUND_AND_VIBRATE
+        )
     }
 
-    private fun stopRepeating() {
-        repeatRunnable?.let { handler.removeCallbacks(it) }
-        repeatRunnable = null
-        repeatingDirection = null
+    private fun sendVolumeEvent() {
+        if (!::audioManager.isInitialized) return
+        val current = audioManager.getStreamVolume(android.media.AudioManager.STREAM_MUSIC)
+        val max = audioManager.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC)
+
+        // Show native panel
+        startService(Intent(this, VolumePanelService::class.java))
+        VolumePanelService.instance?.showPanel(current, max)
     }
 
-    private fun changeVolume(direction: String) {
-        val stream = android.media.AudioManager.STREAM_MUSIC
-        val flags = android.media.AudioManager.FLAG_REMOVE_SOUND_AND_VIBRATE
 
-        when (direction) {
-            "volume_up" -> {
-                audioManager.adjustStreamVolume(stream, android.media.AudioManager.ADJUST_RAISE, flags)
-            }
-            "volume_down" -> {
-                audioManager.adjustStreamVolume(stream, android.media.AudioManager.ADJUST_LOWER, flags)
-            }
-        }
-    }
-
-    fun applySliderVolume(target: Int) {
+    fun applySliderVolume(streamType: Int, target: Int) {
         if (!::audioManager.isInitialized) return
 
-        val stream = android.media.AudioManager.STREAM_MUSIC
-        val max = audioManager.getStreamMaxVolume(stream)
-        val current = audioManager.getStreamVolume(stream)
+        val max = audioManager.getStreamMaxVolume(streamType)
+        val current = audioManager.getStreamVolume(streamType)
 
         val safeTarget = target.coerceIn(0, max)
         val delta = safeTarget - current
@@ -127,30 +111,17 @@ class VolumeAccessibilityService : AccessibilityService() {
 
         repeat(kotlin.math.abs(delta)) {
             // Defensive check to avoid overshooting
-            val now = audioManager.getStreamVolume(stream)
+            val now = audioManager.getStreamVolume(streamType)
             if ((direction == android.media.AudioManager.ADJUST_RAISE && now >= safeTarget) ||
                 (direction == android.media.AudioManager.ADJUST_LOWER && now <= safeTarget)
             ) return@repeat
             
-            audioManager.adjustStreamVolume(stream, direction, flags)
+            audioManager.adjustStreamVolume(streamType, direction, flags)
         }
 
-        Log.d(TAG, "Volume adjusted: $current -> $safeTarget")
+        Log.d(TAG, "Volume adjusted (Stream $streamType): $current -> $safeTarget")
     }
 
-    private fun sendVolumeEvent(direction: String) {
-        if (!::audioManager.isInitialized) return
-        val stream = android.media.AudioManager.STREAM_MUSIC
-        val currentVolume = audioManager.getStreamVolume(stream)
-        val maxVolume = audioManager.getStreamMaxVolume(stream)
-        
-        val intent = Intent("com.example.liquid_volume.VOLUME_CHANGED")
-        intent.setPackage(packageName)
-        intent.putExtra("volume", currentVolume)
-        intent.putExtra("max", maxVolume)
-        intent.putExtra("direction", direction) // Keep direction for legacy if needed, but volume is source of truth
-        sendBroadcast(intent)
-    }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {}
 
@@ -158,7 +129,6 @@ class VolumeAccessibilityService : AccessibilityService() {
 
     override fun onDestroy() {
         super.onDestroy()
-        stopRepeating()
         instance = null
         Log.d(TAG, "Service Destroyed")
     }
